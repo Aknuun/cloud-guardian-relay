@@ -7,7 +7,7 @@ const ADMIN_ID = 172358305;
 //    BOT_VERSION را یک واحد زیاد کن (مثلاً 8.1 → 8.2) و بعد deploy.
 //    نسخه در منوی اصلی ربات نمایش داده می‌شود.
 // ============================================================
-const BOT_VERSION = "8.15";
+const BOT_VERSION = "8.16";
 
 const CF_API = "https://api.cloudflare.com/client/v4";
 const ARVAN_API = "https://napi.arvancloud.ir/cdn/4.0";
@@ -190,7 +190,21 @@ async function processUpdate(payload, env, botToken, adminId) {
     const admins = await getAdmins(kv, env);
     if (!admins.includes(chatId)) return;
 
-    const send = async (msg, kb) => sendMessage(botToken, chatId, msg, kb);
+    const send = async (msg, kb) => {
+      if (msg && msg.indexOf(PERM_MARK) !== -1) {
+        msg = msg.split(PERM_MARK).join("");
+        try {
+          await kv.put(`pretrytxt:${chatId}`, text, { expirationTtl: 900 });
+        } catch (e) {}
+        const rows = kb ? kb.slice() : [];
+        rows.push([
+          { text: "🔄 بررسی مجدد", callback_data: "permretrytxt" },
+          { text: "⬅️ بازگشت", callback_data: "menu" },
+        ]);
+        kb = rows;
+      }
+      return sendMessage(botToken, chatId, msg, kb);
+    };
     const text = payload.message.text.trim();
 
     if (!kv) {
@@ -938,6 +952,49 @@ function escHtml(s) {
 
 function code(s) {
   return `<code>${escHtml(s)}</code>`;
+}
+
+// ============================================================
+// پیام مجوز توکن کلادفلر
+// وقتی خطای کلادفلر به‌خاطر کمبود مجوز توکن باشد، یک نشانگر
+// نامرئی به متن اضافه می‌شود تا لایهٔ ارسال پیام، دکمه‌های
+// «بررسی مجدد» و «بازگشت» را زیر پیام بگذارد.
+// ============================================================
+const PERM_MARK = "\u2063";
+const CF_PERM_CODES = [9109, 10000, 10001, 1010];
+
+function isPermErrors(data) {
+  const errors = Array.isArray(data) ? data : (data && data.errors) || data;
+  const arr = Array.isArray(errors) ? errors : [];
+  return arr.some((e) => e && CF_PERM_CODES.includes(Number(e.code)));
+}
+
+function cfErrText(data) {
+  const errors = Array.isArray(data) ? data : (data && data.errors) || data;
+  let out = JSON.stringify(errors, null, 2).substring(0, 3000);
+  if (isPermErrors(data)) {
+    out =
+      PERM_MARK +
+      out +
+      "\n\n🔑 دسترسی توکن کافی نیست.\n" +
+      "این بخش به مجوز بیشتری روی توکن این اکانت نیاز دارد.\n" +
+      "از پنل کلادفلر برو به: Manage Account → Account API Tokens (یا My Profile → API Tokens)\n" +
+      "→ توکن همین اکانت → Edit → مجوز لازم (مثلاً Zone → Zone Rulesets و Zone → Zone WAF) را اضافه کن، ذخیره کن و دوباره تلاش کن.";
+  }
+  return out;
+}
+
+function parentCb(data) {
+  const d = String(data || "");
+  const tok = (d.match(/[0-9a-f]{12}/) || [])[0];
+  if (/^(zssl|zsec|zperf|zrules|zro|zrp|zrr|zrt|zrd|zrdy|zra|ztog|zval|zvset|zd|zpurge|zdev|zpause|zsearch):/.test(d) && tok) return `zset:${tok}`;
+  if (/^zset:/.test(d)) return "zones";
+  if (/^e:/.test(d) && tok) return `rback:${tok}`;
+  if (/^sel/.test(d) && tok) return `rback:${tok}`;
+  if (/^acc/.test(d)) return "accounts";
+  if (/^(arv|arf)/.test(d)) return "arvan";
+  if (/^(hz|ln)/.test(d)) return "providers";
+  return "menu";
 }
 
 async function resolveIPs(name, kv) {
@@ -2460,7 +2517,7 @@ async function handleAdd(args, accounts, send, kv) {
       [[{ text: "⬅️ دامنه‌ها", callback_data: "zones" }, { text: "🏠 منو", callback_data: "menu" }]]
     );
   } else {
-    await send("❌ خطا از کلودفلر:\n" + JSON.stringify(data.errors, null, 2).substring(0, 3000));
+    await send("❌ خطا از کلودفلر:\n" + cfErrText(data));
   }
 }
 
@@ -2496,7 +2553,7 @@ async function handleEdit(args, accounts, send, kv) {
     await invalidateCache(kv, zone.id);
     await send(`✅ مقدار ${code(record.name)} به ${code(content)} تغییر کرد.`);
   } else {
-    await send("❌ خطا:\n" + JSON.stringify(data.errors, null, 2).substring(0, 3000));
+    await send("❌ خطا:\n" + cfErrText(data));
   }
 }
 
@@ -2522,7 +2579,7 @@ async function handleSetTtl(args, accounts, send, kv) {
     await invalidateCache(kv, zone.id);
     await send(`✅ TTL رکورد ${code(record.name)} به ${data.result.ttl === 1 ? "خودکار" : data.result.ttl} تغییر کرد.`);
   } else {
-    await send("❌ خطا:\n" + JSON.stringify(data.errors, null, 2).substring(0, 3000));
+    await send("❌ خطا:\n" + cfErrText(data));
   }
 }
 
@@ -2547,7 +2604,7 @@ async function handleToggleProxy(args, accounts, send, kv) {
     await invalidateCache(kv, zone.id);
     await send(`✅ Proxy رکورد ${code(record.name)} ${data.result.proxied ? "روشن" : "خاموش"} شد.`);
   } else {
-    await send("❌ خطا:\n" + JSON.stringify(data.errors, null, 2).substring(0, 3000));
+    await send("❌ خطا:\n" + cfErrText(data));
   }
 }
 
@@ -2571,7 +2628,7 @@ async function handleDelete(args, accounts, send, kv) {
     await invalidateCache(kv, zone.id);
     await send(`✅ رکورد ${record.type}-${code(record.name)} حذف شد.`);
   } else {
-    await send("❌ خطا در حذف:\n" + JSON.stringify(delData.errors, null, 2).substring(0, 3000));
+    await send("❌ خطا در حذف:\n" + cfErrText(delData));
   }
 }
 
@@ -2627,7 +2684,7 @@ async function addRecordFromPending(pending, content, accounts, kv, chatId, send
         [[{ text: "🇮🇷 آروان", callback_data: "arvan" }, { text: "🏠 منو", callback_data: "menu" }]]
       );
     } else {
-      await send("❌ خطا:\n" + JSON.stringify(res.errors || res, null, 2).substring(0, 3000));
+      await send("❌ خطا:\n" + cfErrText(res));
     }
     return;
   }
@@ -2645,7 +2702,7 @@ async function addRecordFromPending(pending, content, accounts, kv, chatId, send
       [[{ text: "⬅️ دامنه‌ها", callback_data: "zones" }, { text: "🏠 منو", callback_data: "menu" }]]
     );
   } else {
-    await send("❌ خطا:\n" + JSON.stringify(data.errors, null, 2).substring(0, 3000));
+    await send("❌ خطا:\n" + cfErrText(data));
   }
 }
 
@@ -2750,7 +2807,7 @@ async function resolvePending(pending, value, chatId, accounts, arvanAccounts, s
         [[{ text: "📋 دامنه‌ها", callback_data: "zones" }, { text: "🏠 منو", callback_data: "menu" }]]
       );
     } else {
-      await send("❌ خطا در ثبت دامنه:\n" + JSON.stringify(data.errors, null, 2).substring(0, 3000));
+      await send("❌ خطا در ثبت دامنه:\n" + cfErrText(data));
     }
     return;
   }
@@ -2898,7 +2955,7 @@ async function resolvePending(pending, value, chatId, accounts, arvanAccounts, s
           await send(summary, [[{ text: "🇮🇷 آروان", callback_data: "arvan" }, { text: "🏠 منو", callback_data: "menu" }]]);
         }
       } else {
-        await send("❌ خطا:\n" + JSON.stringify(res.errors || res, null, 2).substring(0, 3000));
+        await send("❌ خطا:\n" + cfErrText(res));
       }
       return;
     }
@@ -2934,7 +2991,7 @@ async function resolvePending(pending, value, chatId, accounts, arvanAccounts, s
             }
             return;
           } else {
-            await send("❌ خطا در ساخت رکورد CNAME:\n" + JSON.stringify(newData.errors || newData, null, 2).substring(0, 2000));
+            await send("❌ خطا در ساخت رکورد CNAME:\n" + cfErrText(newData));
             return;
           }
         } else if (prev.type === "CNAME" && isIp) {
@@ -2962,7 +3019,7 @@ async function resolvePending(pending, value, chatId, accounts, arvanAccounts, s
             }
             return;
           } else {
-            await send("❌ خطا در ساخت رکورد A:\n" + JSON.stringify(newData.errors || newData, null, 2).substring(0, 2000));
+            await send("❌ خطا در ساخت رکورد A:\n" + cfErrText(newData));
             return;
           }
         }
@@ -3008,7 +3065,7 @@ async function resolvePending(pending, value, chatId, accounts, arvanAccounts, s
         await send(summary, [[{ text: "⬅️ دامنه‌ها", callback_data: "zones" }, { text: "🏠 منو", callback_data: "menu" }]]);
       }
     } else {
-      await send("❌ خطا:\n" + JSON.stringify(data.errors, null, 2).substring(0, 3000));
+      await send("❌ خطا:\n" + cfErrText(data));
     }
     return;
   }
@@ -3052,7 +3109,7 @@ async function resolvePending(pending, value, chatId, accounts, arvanAccounts, s
         await send(summary, [[{ text: "⬅️ دامنه‌ها", callback_data: "zones" }, { text: "🏠 منو", callback_data: "menu" }]]);
       }
     } else {
-      await send("❌ خطا:\n" + JSON.stringify(data.errors, null, 2).substring(0, 3000));
+      await send("❌ خطا:\n" + cfErrText(data));
     }
     return;
   }
@@ -3616,7 +3673,7 @@ async function resolvePending(pending, value, chatId, accounts, arvanAccounts, s
 async function handleCallback(cb, botToken, adminId, kv, env) {
   const chatId = cb.message ? cb.message.chat.id : null;
   const messageId = cb.message ? cb.message.message_id : null;
-  const data = cb.data || "";
+  let data = cb.data || "";
 
   await tg(botToken, "answerCallbackQuery", { callback_query_id: cb.id });
 
@@ -3624,8 +3681,30 @@ async function handleCallback(cb, botToken, adminId, kv, env) {
 
   if (data === "noop") return;
 
-  const edit = (text, kb) => editMessage(botToken, chatId, messageId, text, kb);
-  const send = (text, kb) => sendMessage(botToken, chatId, text, kb);
+  const applyPerm = async (text, kb) => {
+    if (!text || text.indexOf(PERM_MARK) === -1) return { text, kb };
+    const clean = text.split(PERM_MARK).join("");
+    const rows = kb ? kb.slice() : [];
+    const row = [];
+    if (data) {
+      try {
+        await kv.put(`pretry:${chatId}`, data, { expirationTtl: 900 });
+        await kv.put(`pback:${chatId}`, parentCb(data), { expirationTtl: 900 });
+      } catch (e) {}
+      row.push({ text: "🔄 بررسی مجدد", callback_data: "permretry" });
+    }
+    row.push({ text: "⬅️ بازگشت", callback_data: "permback" });
+    rows.push(row);
+    return { text: clean, kb: rows };
+  };
+  const edit = async (text, kb) => {
+    const r = await applyPerm(text, kb);
+    return editMessage(botToken, chatId, messageId, r.text, r.kb);
+  };
+  const send = async (text, kb) => {
+    const r = await applyPerm(text, kb);
+    return sendMessage(botToken, chatId, r.text, r.kb);
+  };
 
   if (!kv) {
     await edit("⚠️ KV با نام BOT_KV لازم است.");
@@ -3642,6 +3721,19 @@ async function handleCallback(cb, botToken, adminId, kv, env) {
   const isMain = chatId === adminId;
 
   try {
+    if (data === "permretry") {
+      const prev = await kv.get(`pretry:${chatId}`);
+      if (!prev) return edit("⏳ عملیات قبلی منقضی شد. دوباره از منو تلاش کن.");
+      data = prev;
+    } else if (data === "permback") {
+      const back = await kv.get(`pback:${chatId}`);
+      data = back || "menu";
+    } else if (data === "permretrytxt") {
+      const cmd = await kv.get(`pretrytxt:${chatId}`);
+      if (!cmd) return edit("⏳ عملیات قبلی منقضی شد. دوباره تلاش کن.");
+      await processUpdate({ message: { chat: { id: chatId }, text: cmd } }, env, botToken, adminId);
+      return;
+    }
     if (data === "menu") {
       await kv.delete(`qa:${chatId}`);
       await kv.delete(`pend:${chatId}`);
@@ -3990,7 +4082,7 @@ async function handleCallback(cb, botToken, adminId, kv, env) {
       if (d.success) {
         await renderSettingsGroup(token, session, accounts, edit, groupTitleFor(setting), groupKeysFor(setting));
       } else {
-        await edit("❌ خطا:\n" + JSON.stringify(d.errors, null, 2).substring(0, 3000));
+        await edit("❌ خطا:\n" + cfErrText(d));
       }
     } else if (data.startsWith("zval:")) {
       const parts = data.split(":");
@@ -4021,7 +4113,7 @@ async function handleCallback(cb, botToken, adminId, kv, env) {
       if (d.success) {
         await renderSettingsGroup(token, session, accounts, edit, groupTitleFor(setting), groupKeysFor(setting));
       } else {
-        await edit("❌ خطا:\n" + JSON.stringify(d.errors, null, 2).substring(0, 3000));
+        await edit("❌ خطا:\n" + cfErrText(d));
       }
     } else if (data.startsWith("zd:")) {
       const token = data.slice(3);
@@ -4051,7 +4143,7 @@ async function handleCallback(cb, botToken, adminId, kv, env) {
           [{ text: "⬅️ بازگشت", callback_data: `zset:${token}` }],
         ]);
       } else {
-        await edit("❌ خطا:\n" + JSON.stringify(d.errors, null, 2).substring(0, 3000));
+        await edit("❌ خطا:\n" + cfErrText(d));
       }
     } else if (data.startsWith("zdev:")) {
       const token = data.slice(5);
@@ -4070,7 +4162,7 @@ async function handleCallback(cb, botToken, adminId, kv, env) {
           [{ text: "⬅️ بازگشت", callback_data: `zset:${token}` }],
         ]);
       } else {
-        await edit("❌ خطا:\n" + JSON.stringify(d.errors, null, 2).substring(0, 3000));
+        await edit("❌ خطا:\n" + cfErrText(d));
       }
     } else if (data.startsWith("zpause:")) {
       const token = data.slice(7);
@@ -4089,7 +4181,7 @@ async function handleCallback(cb, botToken, adminId, kv, env) {
           [{ text: "⬅️ بازگشت", callback_data: `zset:${token}` }],
         ]);
       } else {
-        await edit("❌ خطا:\n" + JSON.stringify(d.errors, null, 2).substring(0, 3000));
+        await edit("❌ خطا:\n" + cfErrText(d));
       }
     } else if (data.startsWith("z:")) {
       const parts = data.split(":");
@@ -4317,7 +4409,7 @@ async function handleCallback(cb, botToken, adminId, kv, env) {
           await sleep(2000);
           await redrawSearchResultsNav(kv, accounts, botToken, chatId, messageId, token);
         } else {
-          await edit("❌ خطا:\n" + JSON.stringify(r2.errors || r2, null, 2).substring(0, 3000));
+          await edit("❌ خطا:\n" + cfErrText(r2));
         }
       } else {
         const r = await fetch(`${CF_API}/zones/${res.zone_id}/dns_records/${record.id}`, {
@@ -4336,7 +4428,7 @@ async function handleCallback(cb, botToken, adminId, kv, env) {
           await sleep(2000);
           await redrawSearchResultsNav(kv, accounts, botToken, chatId, messageId, token);
         } else {
-          await edit("❌ خطا:\n" + JSON.stringify(d.errors, null, 2).substring(0, 3000));
+          await edit("❌ خطا:\n" + cfErrText(d));
         }
       }
     } else if (data.startsWith("set:")) {
@@ -4410,7 +4502,7 @@ async function handleCallback(cb, botToken, adminId, kv, env) {
         await sleep(2000);
         await redrawSearchResultsNav(kv, accounts, botToken, chatId, messageId, token);
       } else {
-        await edit("❌ خطا در حذف:\n" + JSON.stringify(delData.errors || delData, null, 2).substring(0, 3000));
+        await edit("❌ خطا در حذف:\n" + cfErrText(delData));
       }
     } else if (data.startsWith("e:")) {
       const parts = data.split(":");
@@ -4521,7 +4613,7 @@ async function handleCallback(cb, botToken, adminId, kv, env) {
           await sleep(2000);
           await redrawRecordDetailNav(kv, accounts, botToken, chatId, messageId);
         } else {
-          await edit("❌ خطا:\n" + JSON.stringify(res.errors || res, null, 2).substring(0, 3000));
+          await edit("❌ خطا:\n" + cfErrText(res));
         }
       } else {
         const res = await fetch(`${CF_API}/zones/${session.zone_id}/dns_records/${recordId}`, {
@@ -4540,7 +4632,7 @@ async function handleCallback(cb, botToken, adminId, kv, env) {
           await sleep(2000);
           await redrawRecordDetailNav(kv, accounts, botToken, chatId, messageId);
         } else {
-          await edit("❌ خطا:\n" + JSON.stringify(data.errors, null, 2).substring(0, 3000));
+          await edit("❌ خطا:\n" + cfErrText(data));
         }
       }
     } else if (data.startsWith("d:")) {
@@ -4576,7 +4668,7 @@ async function handleCallback(cb, botToken, adminId, kv, env) {
         if (res.success !== false) {
           await redrawRecordsList(kv, accounts, botToken, chatId, messageId, token, 0);
         } else {
-          await edit("❌ خطا در حذف:\n" + JSON.stringify(res.errors || res, null, 2).substring(0, 3000));
+          await edit("❌ خطا در حذف:\n" + cfErrText(res));
         }
       } else {
         const del = await fetch(`${CF_API}/zones/${session.zone_id}/dns_records/${recordId}`, {
@@ -4589,7 +4681,7 @@ async function handleCallback(cb, botToken, adminId, kv, env) {
           await invalidateCache(kv, session.zone_id);
           await redrawRecordsList(kv, accounts, botToken, chatId, messageId, token, 0);
         } else {
-          await edit("❌ خطا در حذف:\n" + JSON.stringify(delData.errors, null, 2).substring(0, 3000));
+          await edit("❌ خطا در حذف:\n" + cfErrText(delData));
         }
       }
     } else if (data === "pnl") {
@@ -6516,7 +6608,7 @@ async function qaApply(io) {
   });
   const data = await res.json();
   if (!data.success) {
-    await edit("❌ خطا:\n" + JSON.stringify(data.errors, null, 2).substring(0, 3000));
+    await edit("❌ خطا:\n" + cfErrText(data));
     return true;
   }
   await invalidateCache(kv, qa.zone_id);
@@ -7246,7 +7338,7 @@ async function cfCreateRecords(zone, name, source, accounts, kv, oldName) {
       signal: withTimeout(15000),
     });
     const data = await res.json();
-    if (!data.success) return { error: JSON.stringify(data.errors || data).substring(0, 300) };
+    if (!data.success) return { error: cfErrText(data) };
     created.push(data.result);
   }
   await invalidateCache(kv, zone.id);
