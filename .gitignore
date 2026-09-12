@@ -1,0 +1,12 @@
+# Cloudflare / Wrangler
+.wrangler/
+wrangler.toml
+wrangler.friend.toml
+
+# Backups
+*.bak
+*.bak-*
+*.bak.*
+
+# Dependencies
+node_modules/

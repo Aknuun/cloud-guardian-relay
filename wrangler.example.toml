@@ -1,0 +1,21 @@
+name = "dns-telegram-bot"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+account_id = "YOUR_CLOUDFLARE_ACCOUNT_ID"
+
+[[kv_namespaces]]
+binding = "BOT_KV"
+id = "YOUR_KV_NAMESPACE_ID"
+
+[triggers]
+crons = ["0 9 * * *", "*/10 * * * *", "*/5 * * * *", "* * * * *"]
+
+[vars]
+BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
+ADMIN_ID = "YOUR_TELEGRAM_ADMIN_ID"
+HF_RELAY_URL = "http://relay.example.com:8787"
+HF_RELAY_TOKEN = "YOUR_HF_RELAY_TOKEN"
+# WORKER_URL = "https://dns-telegram-bot.YOUR-SUBDOMAIN.workers.dev"
+CF_ACCOUNTS = """[
+  {"name": "AccountName", "token": "YOUR_CLOUDFLARE_API_TOKEN"}
+]"""

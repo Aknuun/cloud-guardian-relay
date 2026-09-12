@@ -1,0 +1,21 @@
+# نسخهٔ دوست (اکانت کلادفلر جدا).
+name = "dns-telegram-bot"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+account_id = "FRIEND_CLOUDFLARE_ACCOUNT_ID"
+
+[[kv_namespaces]]
+binding = "BOT_KV"
+id = "FRIEND_KV_NAMESPACE_ID"
+
+[triggers]
+crons = ["0 9 * * *", "*/10 * * * *", "*/5 * * * *", "* * * * *"]
+
+[vars]
+BOT_TOKEN = "FRIEND_TELEGRAM_BOT_TOKEN"
+ADMIN_ID = "FRIEND_TELEGRAM_ADMIN_ID"
+CF_ACCOUNTS = """[
+  {"name": "FriendAccountName", "token": "FRIEND_CLOUDFLARE_API_TOKEN"}
+]"""
+HF_RELAY_URL = "http://relay.example.com:8787"
+HF_RELAY_TOKEN = "YOUR_HF_RELAY_TOKEN"
