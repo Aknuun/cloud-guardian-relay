@@ -7,7 +7,7 @@ const ADMIN_ID = 172358305;
 //    BOT_VERSION را یک واحد زیاد کن (مثلاً 8.1 → 8.2) و بعد deploy.
 //    نسخه در منوی اصلی ربات نمایش داده می‌شود.
 // ============================================================
-const BOT_VERSION = "8.18";
+const BOT_VERSION = "8.19";
 
 const CF_API = "https://api.cloudflare.com/client/v4";
 const ARVAN_API = "https://napi.arvancloud.ir/cdn/4.0";
@@ -256,11 +256,8 @@ async function processUpdate(payload, env, botToken, adminId) {
       if (!zone) return send("❌ دامنه پیدا نشد.");
       await showRecords(zone, 0, accounts, send, kv);
     } else if (cmd === "/search") {
-      await send("🔍 جستجوی رکورد\n\nبر اساس چه چیزی جستجو کنیم؟", [
-        [{ text: "🔤 بر اساس نام/دامنه", callback_data: "sf:name" }],
-        [{ text: "🌐 بر اساس IP/مقدار", callback_data: "sf:content" }],
-        [{ text: "🏠 منو", callback_data: "menu" }],
-      ]);
+      await kv.put(`pend:${chatId}`, JSON.stringify({ type: "search_any" }), { expirationTtl: 600 });
+      await send(SEARCH_PROMPT_TEXT, [[{ text: "🏠 منو", callback_data: "menu" }]]);
     } else if (cmd === "/add") {
       await handleAdd(args, accounts, send, kv);
     } else if (cmd === "/edit") {
@@ -292,8 +289,13 @@ function ok() {
 }
 
 function mainMenuText() {
-  return `⚙️ تنظیمات v${BOT_VERSION}\n\n🏠 منوی اصلی\n\nیک گزینه را انتخاب کنید:`;
+  return `به ربات نگهبان ابری خوش اومدی ⚙️ نسخه v${BOT_VERSION}\n\n🏠 در منوی اصلی هستید\n\nیک گزینه را انتخاب کن`;
 }
+
+const SEARCH_PROMPT_TEXT =
+  "🔍 جست‌وجو\n\n" +
+  "در هر بخش از ربات با وارد کردن آی‌پی یا دامنه، افزودن سریع یا جست‌وجو انجام می‌شود.\n\n" +
+  "آی‌پی یا دامنه یا بخشی از آن را بفرستید:";
 
 function mainMenuKeyboard() {
   return [
@@ -3260,6 +3262,30 @@ async function resolvePending(pending, value, chatId, accounts, arvanAccounts, s
     return;
   }
 
+  if (type === "search_any") {
+    await kv.delete(`pend:${chatId}`);
+    const q = txt.trim();
+    if (!q) return send("⚠️ مقداری برای جست‌وجو وارد کنید.");
+    const byName = await searchRecords(accounts, "name", q, null, kv);
+    const byContent = await searchRecords(accounts, "content", q, null, kv);
+    const seen = new Set();
+    const results = [];
+    for (const r of byName.concat(byContent)) {
+      const key = `${r.zone_id}:${r.record.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      results.push(r);
+    }
+    const token = makeToken();
+    await kv.put(
+      `sr:${token}`,
+      JSON.stringify({ field: "any", query: q, results }),
+      { expirationTtl: 3600 }
+    );
+    await renderSearchResults(token, results, q, "any", send);
+    return;
+  }
+
   if (type === "search_zone") {
     await kv.delete(`pend:${chatId}`);
     let results = [];
@@ -3838,11 +3864,8 @@ async function handleCallback(cb, botToken, adminId, kv, env) {
       const page = Number(parts[2]) || 0;
       await showZones(page, flt, accounts, edit, kv, chatId);
     } else if (data === "search") {
-      await edit("🔍 جستجوی رکورد\n\nبر اساس چه چیزی جستجو کنیم؟", [
-        [{ text: "🔤 بر اساس نام/دامنه", callback_data: "sf:name" }],
-        [{ text: "🌐 بر اساس IP/مقدار", callback_data: "sf:content" }],
-        [{ text: "🏠 منو", callback_data: "menu" }],
-      ]);
+      await kv.put(`pend:${chatId}`, JSON.stringify({ type: "search_any" }), { expirationTtl: 600 });
+      await edit(SEARCH_PROMPT_TEXT, [[{ text: "🏠 منو", callback_data: "menu" }]]);
     } else if (data.startsWith("sf:")) {
       const field = data.slice(3);
       await kv.put(`pend:${chatId}`, JSON.stringify({ type: "search", field }), { expirationTtl: 600 });
