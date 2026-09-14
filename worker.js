@@ -7,7 +7,7 @@ const ADMIN_ID = 172358305;
 //    BOT_VERSION را یک واحد زیاد کن (مثلاً 8.1 → 8.2) و بعد deploy.
 //    نسخه در منوی اصلی ربات نمایش داده می‌شود.
 // ============================================================
-const BOT_VERSION = "8.16";
+const BOT_VERSION = "8.18";
 
 const CF_API = "https://api.cloudflare.com/client/v4";
 const ARVAN_API = "https://napi.arvancloud.ir/cdn/4.0";
@@ -459,7 +459,7 @@ function withTimeout(ms) {
 //   • بقیه بر اساس تعداد دکمه در ردیف: ۱ و ۳ ستون → سبز · ۲ و ۴+ ستون → آبی
 //   • ردیف‌های «لیست داده» (دامنه/ساب‌دامنه/رکورد/آی‌پی/سرور و...) بدون رنگ
 //   • هر دکمه می‌تواند با style صریح رنگ ثابت بگیرد یا با {"style":"plain"} بی‌رنگ بماند.
-const DATA_CB = /^(z:|zf:|e:|p:|sel:|selp:|dd:|arv:|arvpage:|sr:|zsf:|ap:|cz:|ndi:|ndip:|ndx:|pnd:|favopen:|favpk:|favpsel:|favpp:|hzsi:|hzpi:|hzni:|hzm:|hzs:|hzp:|hzn:|rempick:|rempage:|remdelx:)/;
+const DATA_CB = /^(z:|zf:|e:|p:|sel:|selp:|dd:|arv:|arvpage:|sr:|zsf:|ap:|cz:|ndi:|ndip:|ndx:|pnd:|favopen:|favpk:|favpsel:|favpp:|hzsi:|hzpi:|hzni:|hzm:|hzs:|hzp:|hzn:|rempick:|rempage:|remdelx:|ipd:|qanz:|qana:)/;
 const DANGER_CB = /(^|[:_])(del|delete|dacc|daccy|darvan|darvany|pnlx|nddel|nddely|sslmdy|hzd|hzdy|bulkdel|stop|suspend|cancel|revoke|reset)([:_]|$)/;
 
 function isPlaceholderBtn(b) {
@@ -2926,7 +2926,7 @@ async function resolvePending(pending, value, chatId, accounts, arvanAccounts, s
   }
 
   if (type === "ar_content") {
-    await addRecordFromPending(pending, txt, arvanAccounts, kv, chatId, send);
+    await addRecordFromPending(pending, txt, accounts, kv, chatId, send);
     return;
   }
 
@@ -3225,6 +3225,26 @@ async function resolvePending(pending, value, chatId, accounts, arvanAccounts, s
       );
     }
     return;
+  }
+
+  if (type === "qan_name") {
+    const name = txt.trim();
+    if (!name || /\s/.test(name)) {
+      return send("⚠️ نام ساب معتبر نیست. یک نام بدون فاصله بفرستید (مثلاً test یا @).");
+    }
+    await kv.put(`pend:${chatId}`, JSON.stringify({ ...pending, type: "qan_confirm", name }), { expirationTtl: 600 });
+    const rtype = isIpv6(pending.ip) ? "AAAA" : "A";
+    const zoneName = pending.provider === "arvan" ? pending.domain : pending.zone_name;
+    const text =
+      `➕ تأیید ساخت ساب\n\n` +
+      `📛 نام: ${code(name)}\n` +
+      `📁 دامنه: ${code(zoneName)}\n` +
+      `🌐 آیپی: ${code(pending.ip)}\n` +
+      `🏷 نوع: ${code(rtype)}\n\n` +
+      `ساخته شود؟`;
+    const kb = [[{ text: "✅ تأیید و ساخت", callback_data: "qanok" }, { text: "❌ لغو", callback_data: "qacancel" }]];
+    if (pending.msgId) return editMessage(botToken, chatId, pending.msgId, text, kb);
+    return send(text, kb);
   }
 
   if (type === "search") {
@@ -6509,24 +6529,144 @@ async function showBulkSelect(kv, accounts, edit, token, zone, page, selected) {
 }
 
 // ===================== تغییر سریع (فرستادن IP / نام در چت) =====================
-async function sendQuickIpMenu(chatId, ip, kv, accounts, send) {
-  const favs = await getFavs(kv, chatId);
-  const lines = ["⚡ تغییر سریع\n", `🎯 IP جدید: ${code(ip)}`, ""];
-  const kb = [];
-  if (favs.length) {
-    lines.push("روی یک سابِ منتخب بزنید:");
-    for (let i = 0; i < favs.length; i++) {
-      const f = favs[i];
-      kb.push([{ text: `⚡ ${favTypeShort(f)} ${favShortName(f)} — ${f.zone_name}`, callback_data: `qafav:${i}` }]);
-    }
-    lines.push("");
-  } else {
-    lines.push("📭 سابِ منتخبی ندارید. از «🔍 جستجو در دامنه‌ها» استفاده کنید یا ابتدا ساب‌ها را ⭐ کنید.");
+async function ipExactResults(ip, accounts, kv) {
+  let results = [];
+  try {
+    const all = await searchRecords(accounts, "content", ip, null, kv);
+    const target = String(ip).trim().toLowerCase();
+    results = all.filter((r) => String(r.record.content || "").trim().toLowerCase() === target);
+  } catch (e) {
+    console.error("IPS_SEARCH", String(e));
   }
-  lines.push("یا نام ساب‌دامین را تایپ کنید تا جستجو و انتخاب کنید.");
-  kb.push([{ text: "🔍 جستجو در دامنه‌ها", callback_data: "qasearch" }]);
+  return results;
+}
+
+async function showIpSubs(io, ip) {
+  const { accounts, kv } = io;
+  const results = await ipExactResults(ip, accounts, kv);
+  const token = makeToken();
+  await kv.put(`ips:${token}`, JSON.stringify({ ip, results }), { expirationTtl: 3600 });
+  await renderIpSearchMenu(io, token, 0);
+}
+
+async function renderIpSearchMenu(io, token, page, note) {
+  const { kv, edit, send } = io;
+  const fn = edit || send;
+  const stored = await kv.get(`ips:${token}`, "json");
+  if (!stored) return fn("⏳ نشست منقضی شد. دوباره آیپی را بفرستید.", mainMenuKeyboard());
+  const ip = stored.ip;
+  const results = stored.results || [];
+  const pages = Math.max(1, Math.ceil(results.length / CZ_PAGE_SIZE));
+  if (page < 0) page = 0;
+  if (page >= pages) page = pages - 1;
+  const slice = results.slice(page * CZ_PAGE_SIZE, page * CZ_PAGE_SIZE + CZ_PAGE_SIZE);
+  const lines = [`🌐 آیپی: ${code(ip)}`, ""];
+  if (!results.length) lines.push("📭 هیچ سابی با این آیپی پیدا نشد.");
+  else lines.push(`✅ ${results.length} ساب با این آیپی پیدا شد:`);
+  const kb = [];
+  for (let i = 0; i < slice.length; i += 2) {
+    const row = [];
+    for (let j = i; j < i + 2; j++) {
+      const res = slice[j];
+      if (res) {
+        const label = `${res.record.type} ${nameShortStr(res.record.name, res.zone_name)}`;
+        row.push({ text: label, callback_data: `ipd:${token}:${page * CZ_PAGE_SIZE + j}` });
+      } else {
+        row.push(EMPTY_BTN);
+      }
+    }
+    kb.push(row);
+  }
+  if (pages > 1) {
+    const nav = [];
+    nav.push(page > 0 ? { text: "◀️", callback_data: `ipsp:${token}:${page - 1}` } : EMPTY_BTN);
+    nav.push({ text: `📄 ${page + 1}/${pages}`, callback_data: "noop" });
+    nav.push(page < pages - 1 ? { text: "▶️", callback_data: `ipsp:${token}:${page + 1}` } : EMPTY_BTN);
+    kb.push(nav);
+  }
+  kb.push([{ text: "➕ افزودن ساب جدید", callback_data: "qanadd", style: "danger" }]);
+  kb.push([{ text: "🏠 منو", callback_data: "menu" }]);
+  await fn((note || "") + lines.join("\n"), kb);
+}
+
+async function sendQuickIpMenu(chatId, ip, kv, accounts, send) {
+  await showIpSubs({ kv, accounts, send, chatId }, ip);
+}
+
+async function refreshIpMenu(io, ip, note) {
+  const { accounts, kv } = io;
+  const results = await ipExactResults(ip, accounts, kv);
+  const token = makeToken();
+  await kv.put(`ips:${token}`, JSON.stringify({ ip, results }), { expirationTtl: 3600 });
+  await renderIpSearchMenu(io, token, 0, note);
+}
+
+async function renderQanZonePicker(io, page) {
+  const { kv, accounts, edit, send } = io;
+  const fn = edit || send;
+  const zones = await getAllZones(accounts, kv);
+  const arvanAccounts = await getArvanAccounts(kv);
+  const items = [];
+  for (const z of zones) {
+    items.push({ text: `${z.status === "active" ? "🟢" : "⚪"} ☁️ ${z.name}`, callback_data: `qanz:${z._acc}:${z.id}` });
+  }
+  for (let i = 0; i < arvanAccounts.length; i++) {
+    let domains = [];
+    try {
+      domains = await arvanGetAllDomains(arvanAccounts[i].token);
+    } catch (e) {
+      domains = [];
+    }
+    for (const d of domains) {
+      items.push({ text: `🇮🇷 ${d.domain}`, callback_data: `qana:${i}:${d.domain}` });
+    }
+  }
+  if (!items.length) {
+    return fn("📭 هیچ دامنه‌ای برای ساخت ساب وجود ندارد.", [[{ text: "🏠 منو", callback_data: "menu" }]]);
+  }
+  const pages = Math.max(1, Math.ceil(items.length / ZONE_PAGE_SIZE));
+  if (page < 0) page = 0;
+  if (page >= pages) page = pages - 1;
+  const slice = items.slice(page * ZONE_PAGE_SIZE, page * ZONE_PAGE_SIZE + ZONE_PAGE_SIZE);
+  const kb = grid2(slice);
+  if (pages > 1) {
+    const nav = [];
+    nav.push(page > 0 ? { text: "◀️", callback_data: `qanp:${page - 1}` } : EMPTY_BTN);
+    nav.push({ text: `📄 ${page + 1}/${pages}`, callback_data: "noop" });
+    nav.push(page < pages - 1 ? { text: "▶️", callback_data: `qanp:${page + 1}` } : EMPTY_BTN);
+    kb.push(nav);
+  }
   kb.push([{ text: "❌ لغو", callback_data: "qacancel" }]);
-  await send(lines.join("\n"), kb);
+  await fn("➕ افزودن ساب جدید\n\nروی دامنه‌ای که می‌خواهید ساب را بسازید کلیک کنید:", kb);
+}
+
+async function createQaSub(pending, io) {
+  const { accounts, kv, chatId, edit } = io;
+  const ip = pending.ip;
+  const name = pending.name;
+  const rtype = isIpv6(ip) ? "AAAA" : "A";
+  const note = `✅ ساب ساخته شد: ${code(rtype + "-" + name)}\n\n`;
+  if (pending.provider === "arvan") {
+    const token = await arvanToken(kv, pending.acc);
+    const res = await arvanCreateRecord(token, pending.domain, rtype, name, ip, false);
+    if (res.success === false) return edit("❌ خطا در ساخت ساب:\n" + cfErrText(res));
+    await kv.delete(`pend:${chatId}`);
+    await kvDeleteCached(kv, "arvan:cached:domains");
+    await refreshIpMenu({ kv, accounts, edit, chatId }, ip, note);
+    return;
+  }
+  const fullName = normalizeName(name, pending.zone_name);
+  const res = await fetch(`${CF_API}/zones/${pending.zone_id}/dns_records`, {
+    method: "POST",
+    headers: hdr(accounts[pending.acc].token),
+    body: JSON.stringify({ type: rtype, name: fullName, content: ip, ttl: 1, proxied: false }),
+    signal: withTimeout(),
+  });
+  const data = await res.json();
+  if (!data.success) return edit("❌ خطا در ساخت ساب:\n" + cfErrText(data));
+  await invalidateCache(kv, pending.zone_id);
+  await kv.delete(`pend:${chatId}`);
+  await refreshIpMenu({ kv, accounts, edit, chatId }, ip, note);
 }
 
 async function renderQuickResults(token, results, query, qa, send) {
@@ -6921,6 +7061,93 @@ async function dispatchFavQa(data, io) {
     await kv.delete(`qa:${chatId}`);
     await kv.delete(`pend:${chatId}`);
     await edit(mainMenuText(), mainMenuKeyboard());
+    return true;
+  }
+  if (data.startsWith("ipd:")) {
+    const parts = data.split(":");
+    const token = parts[1];
+    const idx = Number(parts[2]);
+    const stored = await kv.get(`ips:${token}`, "json");
+    if (!stored || !stored.results[idx]) {
+      await edit("⏳ نشست منقضی شد. دوباره آی‌پی را بفرستید.", mainMenuKeyboard());
+      return true;
+    }
+    const res = stored.results[idx];
+    const page = Math.floor(idx / CZ_PAGE_SIZE);
+    const stoken = makeToken();
+    await kv.put(`s:${stoken}`, JSON.stringify({ zone_id: res.zone_id, zone_name: res.zone_name, acc: res.acc }), { expirationTtl: 86400 });
+    await kv.put(`dd:${chatId}:${messageId}`, JSON.stringify({ token: stoken, recordId: res.record.id, backCb: `ipback:${token}:${page}` }), { expirationTtl: 86400 });
+    await renderRecordDetail(kv, accounts, edit, chatId, stoken, res.record.id, `ipback:${token}:${page}`);
+    return true;
+  }
+  if (data.startsWith("ipback:") || data.startsWith("ipsp:")) {
+    const parts = data.split(":");
+    await renderIpSearchMenu(io, parts[1], Number(parts[2]) || 0);
+    return true;
+  }
+  if (data === "qanadd") {
+    const qa = await kv.get(`qa:${chatId}`, "json");
+    if (!qa || !qa.ip) {
+      await edit("⏳ نشست منقضی شد. دوباره آی‌پی را بفرستید.", mainMenuKeyboard());
+      return true;
+    }
+    await renderQanZonePicker(io, 0);
+    return true;
+  }
+  if (data.startsWith("qanp:")) {
+    await renderQanZonePicker(io, Number(data.slice(5)) || 0);
+    return true;
+  }
+  if (data.startsWith("qanz:")) {
+    const parts = data.split(":");
+    const accIndex = Number(parts[1]);
+    const zoneId = parts[2];
+    const qa = await kv.get(`qa:${chatId}`, "json");
+    if (!qa || !qa.ip) {
+      await edit("⏳ نشست منقضی شد. دوباره آی‌پی را بفرستید.", mainMenuKeyboard());
+      return true;
+    }
+    const zone = await getZoneById(zoneId, accIndex, accounts);
+    if (!zone) {
+      await edit("❌ دامنه پیدا نشد.");
+      return true;
+    }
+    await kv.put(
+      `pend:${chatId}`,
+      JSON.stringify({ type: "qan_name", ip: qa.ip, acc: accIndex, zone_id: zone.id, zone_name: zone.name, provider: "cloudflare", msgId: messageId }),
+      { expirationTtl: 600 }
+    );
+    await edit(`➕ افزودن ساب در ${code(zone.name)}\n\n🌐 آی‌پی: ${code(qa.ip)}\n\nنام ساب را بفرستید (مثلاً test یا @):`, [
+      [{ text: "❌ لغو", callback_data: "qacancel" }],
+    ]);
+    return true;
+  }
+  if (data.startsWith("qana:")) {
+    const parts = data.split(":");
+    const accIndex = Number(parts[1]);
+    const domain = parts.slice(2).join(":");
+    const qa = await kv.get(`qa:${chatId}`, "json");
+    if (!qa || !qa.ip) {
+      await edit("⏳ نشست منقضی شد. دوباره آی‌پی را بفرستید.", mainMenuKeyboard());
+      return true;
+    }
+    await kv.put(
+      `pend:${chatId}`,
+      JSON.stringify({ type: "qan_name", ip: qa.ip, acc: accIndex, domain, provider: "arvan", msgId: messageId }),
+      { expirationTtl: 600 }
+    );
+    await edit(`➕ افزودن ساب در ${code(domain)}\n\n🌐 آی‌پی: ${code(qa.ip)}\n\nنام ساب را بفرستید (مثلاً test یا @):`, [
+      [{ text: "❌ لغو", callback_data: "qacancel" }],
+    ]);
+    return true;
+  }
+  if (data === "qanok") {
+    const pending = await kv.get(`pend:${chatId}`, "json");
+    if (!pending || pending.type !== "qan_confirm") {
+      await edit("⏳ عملیات منقضی شد. دوباره آی‌پی را بفرستید.", mainMenuKeyboard());
+      return true;
+    }
+    await createQaSub(pending, io);
     return true;
   }
   if (data.startsWith("qafav:")) {
