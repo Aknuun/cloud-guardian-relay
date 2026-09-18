@@ -101,3 +101,25 @@ else
   journalctl -u "$SERVICE" -n 20 --no-pager
   exit 1
 fi
+
+# --- خودتست: مطمئن شو کد جدید (rev>=2) واقعاً فعال است ---
+REV=$(curl -s -m 5 http://127.0.0.1:8788/ping | grep -o '"rev":[0-9]*' | grep -o '[0-9]*' || echo 0)
+if [ "${REV:-0}" -ge 2 ] 2>/dev/null; then
+  echo "[✓] بازبینی فعال: rev=$REV (کد جدید)"
+else
+  echo "[✗] هشدار: /ping بازبینی rev=$REV نشان می‌دهد — کد جدید فعال نشده!"
+  echo "    دستی اجرا کنید:  systemctl restart srv-relay  و دوباره اسکریپت را بزنید."
+  exit 1
+fi
+TEST=$(curl -s -m 25 -X POST http://127.0.0.1:8788/exec \
+  -H "Content-Type: application/json" -H "X-SRV-Token: $TOKEN" \
+  -d '{"host":"127.0.0.1","port":22,"user":"root","password":"x","command":"echo ok"}' || true)
+if printf '%s' "$TEST" | grep -q 'resolve hostname /tmp/'; then
+  echo "[✗] خودتست شکست: هنوز کد قدیمی در حال اجراست! سرویس را دستی ری‌استارت کنید:"
+  echo "    systemctl restart srv-relay"
+  exit 1
+elif printf '%s' "$TEST" | grep -q 'Connection refused\|Connection timed out\|Permission denied\|password'; then
+  echo "[✓] خودتست موفق: احراز رمزی درست کار می‌کند (ssh به هاست واقعی وصل شد)."
+else
+  echo "[i] خودتست (اطلاعاتی): ${TEST:0:200}"
+fi

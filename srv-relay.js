@@ -18,6 +18,9 @@ const os = require("os");
 
 const PORT = Number(process.env.SRV_RELAY_PORT || 8788);
 const TOKEN = process.env.SRV_RELAY_TOKEN || "";
+// شناسهٔ بازبینی کد — در /ping برگردانده می‌شود تا از بیرون بتوان فهمید کدام نسخه فعال است
+// rev 2 = رفع باگ احراز رمزی (sshpass) + تایم‌اوت per-request
+const RELAY_REV = 2;
 
 // محدودیت‌ها
 const EXEC_TIMEOUT_MS = Number(process.env.SRV_EXEC_TIMEOUT_MS || 45000);
@@ -265,7 +268,7 @@ const server = http.createServer(async (req, res) => {
   const p = u.pathname.replace(/\/+$/, "") || "/";
   try {
     // health-check بدون توکن
-    if (p === "/ping") return json(res, 200, { ok: true, service: "srv-relay", ts: Date.now() });
+    if (p === "/ping") return json(res, 200, { ok: true, service: "srv-relay", rev: RELAY_REV, ts: Date.now() });
 
     // احراز هویت برای بقیهٔ مسیرها
     const token = req.headers["x-srv-token"] || u.searchParams.get("token") || "";
