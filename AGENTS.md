@@ -7,20 +7,41 @@
 - `BOT_VERSION` تنها منبع نسخه است و در منوی اصلی و دستور `/version` نمایش داده می‌شود.
 - در پایان هر تغییر، شمارهٔ نسخهٔ جدید را در پاسخ گزارش کن.
 
+## قانون اعلان انتشار (مهم — یادت نره)
+- برای هر نسخهٔ جدید، در `RELEASE_NOTES` (بالای `worker.js`) یک ورودی با شمارهٔ همان نسخه و فهرست قابلیت‌های جدید بنویس.
+- ربات خودش بعد از deploy، **یک‌بار** برای همهٔ ادمین‌ها پیام «نسخهٔ جدید + قابلیت‌ها» همراه با دکمهٔ «🚀 استارت» می‌فرستد (تابع `announceRelease`، از طریق کرون `*/10`). نیازی به ارسال دستی نیست.
+- اگر ورودی `RELEASE_NOTES` برای نسخه نباشد، متن پیش‌فرض «بهبود عملکرد و رفع باگ» فرستاده می‌شود؛ پس همیشه قابلیت‌ها را بنویس.
+- اعلان با کلید `release_seen` در KV یک‌بار برای هر نسخه کنترل می‌شود (به ازای هر deployment/KV جدا).
+
 ## deploy
+- فقط **ورکر اصلی** deploy شود؛ هرگز `wrangler.friend.toml` را بدون درخواست صریح deploy نکن.
+- ورکر اصلی زیر اکانت کلادفلر `b9c357e0…` (subdomain: `yaram169`) میزبانی می‌شود.
+- توکن Cloudflare در فایل **`.env`** همین پوشه (کلید `CLOUDFLARE_API_TOKEN`) ذخیره شده و در `.gitignore` است. **هرگز از کاربر توکن نخواه و آن را چاپ/commit نکن؛** فقط از همان فایل استفاده کن.
+- `CF_ACCOUNTS` فقط اکانت خودِ کاربر (Aknuun) را دارد؛ توکن کس دیگری را داخل کد/config نگذار.
 ```bash
-cd /root/cloud-guardian-bot && CLOUDFLARE_API_TOKEN=$CLOUDFLARE_API_TOKEN npx --yes wrangler@4.129.1 deploy
+cd /root/cloud-guardian-bot && set -a && . ./.env && set +a && npx --no-install wrangler deploy
 ```
 
-## نسخهٔ دوست (deployment دوم)
-- فایل: `wrangler.friend.toml` (همان `worker.js`، ولی `name` و `KV` و `BOT_TOKEN`/`ADMIN_ID` جدا).
-- deploy:
-```bash
-cd /root/cloud-guardian-bot && CLOUDFLARE_API_TOKEN=<friend-cf-token> npx --yes wrangler@4.129.1 deploy -c wrangler.friend.toml
-```
+## نسخهٔ دوست (deployment دوم) — deploy نکن
+- فایل `wrangler.friend.toml` مربوط به ربات دوست است. **تا وقتی کاربر صریحاً درخواست نکند، deploy نکن.**
 - ربات تلگرامِ دوست باید توکن مستقل از BotFather داشته باشد (یک توکن = یک ربات).
 
+## کرون‌ها و بار (مهم)
+- کرون‌ها: `0 9 * * *` (SSL) · `*/10 * * * *` (نود + مصرف + اعلان نسخه) · `*/5 * * * *` (تعویض هاست) · `* * * * *` (یادآورها).
+- تعویض هاست: `intervalMin` پیش‌فرض **۲۵** دقیقه (کرون `*/5` + گارد داخلی). مقدار قدیمی ۱۱ با پرچم `iv25` یک‌بار مهاجرت می‌شود.
+- مانیتور مصرف: گارد `um_last_run` با حداقل **۱۵ دقیقه** (عملاً هر ~۲۰ دقیقه).
+- مانیتور نود: کش توکن پنل در همان اجرا + نوشتن state فقط در صورت تغییر.
+- تعویض هاست: `host_filter_state` فقط در صورت تغییر نوشته می‌شود. این بهینه‌سازی‌ها را برنگردان مگر دلیل داشته باشی.
+
+## مانیتور انقضای دامنه (.ir) — مهم
+- ایرنیک از سال ۱۴۰۱ فیلد `expire-date` را از whois عمومی حذف کرده؛ **هیچ منبع رایگانی** (whois.com / who.is / whois.vu / negareno / whoise.ir / networkcalc / OTX) تاریخ .ir را نمی‌دهد و همه فقط خروجی فیلترشدهٔ ایرنیک را برمی‌گردانند. `.ir` هم RDAP ندارد.
+- راه‌حل: **WhoisXMLAPI Domain Info API** → `https://domain-info.whoisxmlapi.com/api/v1?apiKey=...&domainName=...` که فیلدهای حذف‌شده را از دیتابیس تاریخی پر می‌کند. کلید از داخل ربات (مانیتور انقضا → 🔑 کلید API) در KV با کلید `dom_expiry_cfg` ذخیره می‌شود؛ یا env `WHOIS_API_KEY` / `WHOIS_API_PROVIDER`.
+- توابع: `getDomExpCfg/saveDomExpCfg` · `whoisXmlDomainInfo` · `whoisXmlWhoisService` · `domainExpiryViaApi` · `findExpiryInJson`. مسیر fallback: `.ir`: whois.nic.ir → API · بین‌المللی: RDAP → API.
+- هر تست/تغییر این بخش را با `pcapps.ir` بسنج (دامنهٔ نمونهٔ کاربر).
+
 ## نکته‌های فنی
-- رلهٔ check-host روی سرور: `hf-relay.js` + سرویس `hf-relay` + `relay.videobazi.com:8787`.
-- Globalping بدون رله از خود Worker کار می‌کند.
+- رلهٔ check-host روی سرور: `hf-relay.js` + سرویس `hf-relay` + `relay.videobazi.com:8787` (مسیر اصلی تعویض هاست؛ `HF_RELAY_URL`/`HF_RELAY_TOKEN`).
+- رلهٔ واحد SSH روی سرور: `srv-relay.js` + سرویس `srv-relay` + `relay.videobazi.com:8788` (`SRV_RELAY_URL`/`SRV_RELAY_TOKEN`). فایل‌های رله در ریپوی عمومی جدا `Aknuun/cloud-guardian-relay` هستند (مخزن اصلی خصوصی می‌ماند). آپدیت رله با one-liner نصب. `/ping` فیلد `rev` برمی‌گرداند (۲ = کد رفع‌شدهٔ احراز رمزی)؛ اگر rev<2 بود یعنی سرور هنوز کد قدیمی اجرا می‌کند — کش CDN raw حداکثر ~۵ دقیقه است.
+- check-host درخواست‌های IP کلادفلر را ۴۰۳ می‌کند؛ Globalping بدون هیچ واسطه‌ای از خود Worker کار می‌کند.
+- پروکسی HTTP آزمایش شد و **حذف شد**: `connect()` کلادفلر به پروکسی نمیرسید («cannot connect to the specified address»). دیگر سراغ پروکسی نرو.
 - آروان: ساخت دامنه از API ممکن نیست؛ دامنه باید در پنل آروان اضافه شود و کلید Machine User باید به آن دامنه دسترسی داشته باشد.
