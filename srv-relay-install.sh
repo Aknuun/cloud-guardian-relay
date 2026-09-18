@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ============================================================
 # srv-relay installer — رلهٔ واحد SSH برای ربات نگهبان ابری
-# نصب/آپدیت:  sudo bash -c "$(curl -sL https://raw.githubusercontent.com/Aknuun/Cloud-Guardian-bot/main/srv-relay-install.sh)"
+# نصب/آپدیت:  sudo bash -c "$(curl -sL https://raw.githubusercontent.com/Aknuun/cloud-guardian-relay/main/srv-relay-install.sh)"
 # یا با توکن دلخواه:  sudo SRV_RELAY_TOKEN=<token> bash srv-relay-install.sh
 # • اگر srv-relay.js کنار اسکریپت باشد از همان استفاده می‌شود؛
 #   وگرنه از مخزن گیت‌هاب دانلود می‌شود.
@@ -14,8 +14,8 @@ APP_DIR="/opt/srv-relay"
 SERVICE="${APP_NAME}.service"
 SERVICE_FILE="/etc/systemd/system/${SERVICE}"
 RAW_URLS=(
-  "https://raw.githubusercontent.com/Aknuun/Cloud-Guardian-bot/main/srv-relay.js"
-  "https://cdn.jsdelivr.net/gh/Aknuun/Cloud-Guardian-bot@main/srv-relay.js"
+  "https://raw.githubusercontent.com/Aknuun/cloud-guardian-relay/main/srv-relay.js"
+  "https://cdn.jsdelivr.net/gh/Aknuun/cloud-guardian-relay@main/srv-relay.js"
 )
 TOKEN="${SRV_RELAY_TOKEN:-}"
 
