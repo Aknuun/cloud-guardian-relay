@@ -15,6 +15,7 @@ SERVICE="${APP_NAME}.service"
 SERVICE_FILE="/etc/systemd/system/${SERVICE}"
 RAW_URLS=(
   "https://raw.githubusercontent.com/Aknuun/cloud-guardian-relay/main/srv-relay.js"
+  "https://api.github.com/repos/Aknuun/cloud-guardian-relay/contents/srv-relay.js?ref=main"
   "https://cdn.jsdelivr.net/gh/Aknuun/cloud-guardian-relay@main/srv-relay.js"
 )
 TOKEN="${SRV_RELAY_TOKEN:-}"
@@ -30,11 +31,18 @@ else
   ok=0
   for u in "${RAW_URLS[@]}"; do
     # cache-buster: کش CDN را دور می‌زنیم تا همیشه آخرین نسخه نصب شود
-    bu="$u?_=$(date +%s)"
+    case "$u" in
+      *api.github.com*) bu="$u&_=$(date +%s)" ;;
+      *cdn.jsdelivr.net*) bu="$u" ;; # jsDelivr خودش کش می‌کند؛ با پارامتر نمی‌شکند
+      *) bu="$u?_=$(date +%s)" ;;
+    esac
     echo "    -> $u"
-    if curl -fsSL --max-time 30 "$bu" -o "$SRC_FILE" && grep -q "RELAY_REV" "$SRC_FILE" 2>/dev/null; then
-      ok=1; break
+    curl -fsSL --max-time 30 "$bu" -o "$SRC_FILE" 2>/dev/null || true
+    # اگر پاسخ JSON بود (مسیر API)، محتوای base64 را با node دیکد کن (روی سرور رله node هست)
+    if head -c 1 "$SRC_FILE" 2>/dev/null | grep -q '{' && command -v node >/dev/null 2>&1; then
+      node -e "const fs=require('fs');try{const j=JSON.parse(fs.readFileSync('$SRC_FILE','utf8'));fs.writeFileSync('$SRC_FILE.d',Buffer.from(j.content,'base64'));}catch(e){process.exit(1)}" && mv "$SRC_FILE.d" "$SRC_FILE" || true
     fi
+    if grep -q "RELAY_REV" "$SRC_FILE" 2>/dev/null; then ok=1; break; fi
   done
   if [ "$ok" != "1" ]; then
     echo "[✗] دانلود نسخهٔ جدید ناموفق بود (کش CDN ممکن است قدیمی باشد)."
