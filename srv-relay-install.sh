@@ -29,13 +29,19 @@ else
   echo "[*] دانلود srv-relay.js از مخزن…"
   ok=0
   for u in "${RAW_URLS[@]}"; do
+    # cache-buster: کش CDN را دور می‌زنیم تا همیشه آخرین نسخه نصب شود
+    bu="$u?_=$(date +%s)"
     echo "    -> $u"
-    if curl -fsSL --max-time 30 "$u" -o "$SRC_FILE" && grep -q "srv-relay" "$SRC_FILE" 2>/dev/null; then ok=1; break; fi
+    if curl -fsSL --max-time 30 "$bu" -o "$SRC_FILE" && grep -q "RELAY_REV" "$SRC_FILE" 2>/dev/null; then
+      ok=1; break
+    fi
   done
   if [ "$ok" != "1" ]; then
-    echo "[✗] دانلود از مخزن ناموفق بود. فایل srv-relay.js را کنار اسکریپت بگذارید و دوباره اجرا کنید."
+    echo "[✗] دانلود نسخهٔ جدید ناموفق بود (کش CDN ممکن است قدیمی باشد)."
+    echo "    چند دقیقه بعد دوباره اجرا کنید، یا فایل srv-relay.js را کنار اسکریپت بگذارید."
     exit 1
   fi
+  echo "[✓] فایل جدید تأیید شد (شامل نشانگر rev)."
 fi
 
 mkdir -p "$APP_DIR"
