@@ -114,20 +114,23 @@ if systemctl list-unit-files 2>/dev/null | grep -q '^srv-relay.service'; then
 fi
 OLDPIDS=""
 if command -v ss >/dev/null 2>&1; then
-  OLDPIDS=$(ss -Hlpt "sport = :8788" 2>/dev/null | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | sort -u)
+  OLDPIDS=$(ss -Hlpt "sport = :8788" 2>/dev/null | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | sort -u || true)
 fi
 if [ -z "$OLDPIDS" ] && command -v lsof >/dev/null 2>&1; then
-  OLDPIDS=$(lsof -ti :8788 2>/dev/null | sort -u)
+  OLDPIDS=$(lsof -ti :8788 2>/dev/null | sort -u || true)
 fi
 if [ -z "$OLDPIDS" ] && command -v fuser >/dev/null 2>&1; then
-  OLDPIDS=$(fuser 8788/tcp 2>/dev/null | tr ' ' '\n' | sort -u)
+  OLDPIDS=$(fuser 8788/tcp 2>/dev/null | tr ' ' '\n' | sort -u || true)
 fi
 if [ -n "$OLDPIDS" ]; then
   for p in $OLDPIDS; do
-    CMDLINE=$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null)
+    CMDLINE=""
+    if [ -r "/proc/$p/cmdline" ]; then
+      CMDLINE=$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null || true)
+    fi
     case "$CMDLINE" in
       *srv-relay.js*)
-        kill -TERM "$p" 2>/dev/null
+        kill -TERM "$p" 2>/dev/null || true
         echo "    پروسهٔ قدیمی (pid=$p) که 8788 را گرفته بود متوقف شد."
         ;;
       *)
