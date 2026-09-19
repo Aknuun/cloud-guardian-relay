@@ -20,7 +20,8 @@ const PORT = Number(process.env.SRV_RELAY_PORT || 8788);
 const TOKEN = process.env.SRV_RELAY_TOKEN || "";
 // شناسهٔ بازبینی کد — در /ping برگردانده می‌شود تا از بیرون بتوان فهمید کدام نسخه فعال است
 // rev 2 = رفع باگ احراز رمزی (sshpass) + تایم‌اوت per-request
-const RELAY_REV = 2;
+// rev 3 = رفع باگ MEM/SWAP/DISK/UPTIME: printf بدون \n باعث میشد pick() مقدار را نگیرد
+const RELAY_REV = 3;
 
 // محدودیت‌ها
 const EXEC_TIMEOUT_MS = Number(process.env.SRV_EXEC_TIMEOUT_MS || 45000);
@@ -165,6 +166,7 @@ async function sshExec(host, port, user, auth, command, timeoutMs, onStdout) {
   try {
     let env = { ...process.env };
     let bin = "ssh";
+    let args;
     if (files.keyPath) {
       // کلید: اگر passphrase دارد از طریق اسکریپت askpass (در env) پاس می‌شود
       if (files.passPath) {
@@ -201,15 +203,15 @@ async function sshStats(host, port, user, auth) {
     "echo '===CORES==='",
     "nproc",
     "echo '===MEM==='",
-    "free -m | awk '/Mem:/{printf \"%d %d %d\", $2, $3, $7}'",
+    "free -m | awk '/Mem:/{printf \"%d %d %d\\n\", $2, $3, $7}'",
     "echo '===SWAP==='",
-    "free -m | awk '/Swap:/{printf \"%d %d\", $2, $3; exit}'",
+    "free -m | awk '/Swap:/{printf \"%d %d\\n\", $2, $3; exit}'",
     "echo '===DISK==='",
-    "df -h / | awk 'NR==2{printf \"%s %s %s %s\", $2, $3, $4, $5}'",
+    "df -h / | awk 'NR==2{printf \"%s %s %s %s\\n\", $2, $3, $4, $5}'",
     "echo '===LOAD==='",
     "cat /proc/loadavg | awk '{print $1, $2, $3}'",
     "echo '===UPTIME==='",
-    "awk '{printf \"%.0f\", $1}' /proc/uptime",
+    "awk '{printf \"%.0f\\n\", $1}' /proc/uptime",
     "echo '===NET==='",
     "cat /proc/net/dev | awk 'NR>2 && $1!~/lo:/ {gsub(\":\",\"\",$1); print $1, $2, $10}'",
     "echo '===PG==='",

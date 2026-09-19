@@ -79,6 +79,32 @@ elif command -v yum >/dev/null 2>&1; then
   yum install -y openssh-clients sshpass curl >/dev/null 2>&1 || true
 fi
 
+# --- اطمینان از وجود node با نسخهٔ کافی (رله به نود >= ۱۸ نیاز دارد) ---
+NODE_MAJ=""
+if command -v node >/dev/null 2>&1; then
+  NODE_MAJ=$(node -v 2>/dev/null | tr -d 'v' | cut -d. -f1)
+fi
+if [ -z "${NODE_MAJ:-}" ] || ! [ "${NODE_MAJ:-0}" -ge 18 ] 2>/dev/null; then
+  echo "[*] node پیدا نشد یا نسخهٔ آن قدیمی است؛ نصب Node.js 22 (NodeSource/Distro)…"
+  if command -v apt-get >/dev/null 2>&1; then
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - || { echo "[✗] نصب NodeSource ناموفق بود؛ node را دستی نصب کنید."; exit 1; }
+    apt-get install -y nodejs || { echo "[✗] نصب nodejs ناموفق بود."; exit 1; }
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf module reset nodejs -y >/dev/null 2>&1 || true
+    dnf module enable nodejs:22 -y >/dev/null 2>&1 || true
+    dnf install -y nodejs || { echo "[✗] نصب nodejs ناموفق بود."; exit 1; }
+  elif command -v yum >/dev/null 2>&1; then
+    curl -fsSL https://rpm.nodesource.com/setup_22.x | bash - || { echo "[✗] نصب NodeSource ناموفق بود؛ node را دستی نصب کنید."; exit 1; }
+    yum install -y nodejs || { echo "[✗] نصب nodejs ناموفق بود."; exit 1; }
+  else
+    echo "[✗] پکیج‌منیجر پشتیبانی‌شده پیدا نشد؛ لطفاً node (نسخهٔ ۱۸+) را دستی نصب کنید و دوباره اسکریپت را اجرا کنید."
+    exit 1
+  fi
+fi
+command -v node >/dev/null 2>&1 || { echo "[✗] node هنوز در PATH نیست؛ دستی نصب کنید."; exit 1; }
+NODE_BIN="$(command -v node)"
+echo "[✓] node: $("$NODE_BIN" --version) ($NODE_BIN)"
+
 echo "[*] ساخت سرویس systemd…"
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
@@ -90,7 +116,7 @@ Type=simple
 WorkingDirectory=${APP_DIR}
 Environment=SRV_RELAY_PORT=8788
 Environment=SRV_RELAY_TOKEN=${TOKEN}
-ExecStart=$(command -v node || echo /usr/bin/node) ${APP_DIR}/srv-relay.js
+ExecStart=${NODE_BIN} ${APP_DIR}/srv-relay.js
 Restart=always
 RestartSec=5
 NoNewPrivileges=no
