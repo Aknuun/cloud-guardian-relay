@@ -105,6 +105,41 @@ command -v node >/dev/null 2>&1 || { echo "[✗] node هنوز در PATH نیس�
 NODE_BIN="$(command -v node)"
 echo "[✓] node: $("$NODE_BIN" --version) ($NODE_BIN)"
 
+# --- آزادسازی پورت 8788 و حذف سرویس/پروسهٔ قبلی تا نصب جدید بدون خطا انجام شود ---
+echo "[*] بررسی وضعیت قبلی روی پورت 8788…"
+if systemctl list-unit-files 2>/dev/null | grep -q '^srv-relay.service'; then
+  systemctl stop srv-relay >/dev/null 2>&1 || true
+  systemctl disable srv-relay >/dev/null 2>&1 || true
+  echo "    سرویس قبلی srv-relay متوقف شد."
+fi
+OLDPIDS=""
+if command -v ss >/dev/null 2>&1; then
+  OLDPIDS=$(ss -Hlpt "sport = :8788" 2>/dev/null | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | sort -u)
+fi
+if [ -z "$OLDPIDS" ] && command -v lsof >/dev/null 2>&1; then
+  OLDPIDS=$(lsof -ti :8788 2>/dev/null | sort -u)
+fi
+if [ -z "$OLDPIDS" ] && command -v fuser >/dev/null 2>&1; then
+  OLDPIDS=$(fuser 8788/tcp 2>/dev/null | tr ' ' '\n' | sort -u)
+fi
+if [ -n "$OLDPIDS" ]; then
+  for p in $OLDPIDS; do
+    CMDLINE=$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null)
+    case "$CMDLINE" in
+      *srv-relay.js*)
+        kill -TERM "$p" 2>/dev/null
+        echo "    پروسهٔ قدیمی (pid=$p) که 8788 را گرفته بود متوقف شد."
+        ;;
+      *)
+        echo "    ⚠️ pid=$p روی پورت 8788 متعلق به یک خدمت دیگر است:"
+        echo "       ${CMDLINE:-نامشخص}"
+        echo "       اگر رله است، آن را متوقف کنید؛ وگرنه پورت/سرویس را دستی آزاد کنید."
+        ;;
+    esac
+  done
+  sleep 1
+fi
+
 echo "[*] ساخت سرویس systemd…"
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
