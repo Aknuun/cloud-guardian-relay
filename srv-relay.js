@@ -329,7 +329,7 @@ const server = http.createServer(async (req, res) => {
     if (p === "/http") {
       // پروکسی HTTP عمومی — برای سرویس‌هایی که کلادفلر ورکر به آن‌ها دسترسی ندارد
       // (مثل آروان که آی‌پی‌های کلادفلر را رد می‌کند). درخواست از روی هاست رله می‌رود.
-      const { method, url, headers, body, timeoutMs } = body || {};
+      const { method, url, headers, body: bodyPayload, timeoutMs } = body || {};
       const m = String(method || "GET").toUpperCase();
       if (!/^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)$/.test(m)) return json(res, 400, { error: "bad_method" });
       let tu;
@@ -343,7 +343,7 @@ const server = http.createServer(async (req, res) => {
       const timer = setTimeout(() => controller.abort(), tMs);
       try {
         const init = { method: m, headers: { ...(headers || {}) }, signal: controller.signal };
-        if (body !== undefined && body !== null && !/^(GET|HEAD)$/.test(m)) init.body = String(body);
+        if (bodyPayload !== undefined && bodyPayload !== null && !/^(GET|HEAD)$/.test(m)) init.body = String(bodyPayload);
         const resp = await fetch(tu.href, init);
         const buf = Buffer.from(await resp.arrayBuffer());
         const MAX_BODY = 3 * 1024 * 1024; // سقف بدنهٔ پاسخ (۳MB)
