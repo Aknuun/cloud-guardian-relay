@@ -6,6 +6,7 @@
 //   • /exec  → اجرای یک دستور SSH (با رمز یا کلید) — SSH اینلاین داخل چت
 //   • /install-node → نصب خودکار نود پاسارگارد (pg-node.sh) روی سرور مقصد
 //   • /stats → مانیتور سرور: CPU / RAM / دیسک / uptime / پهنای باند
+//   • /http  → پروکسی HTTP عمومی (برای APIهایی که کلادفلر به آن‌ها دسترسی ندارد، مثل آروان)
 //   • /ping  → health-check رله
 //
 // نصب: sudo bash srv-relay-install.sh   (systemd + فایروال)
@@ -18,10 +19,16 @@ const os = require("os");
 
 const PORT = Number(process.env.SRV_RELAY_PORT || 8788);
 const TOKEN = process.env.SRV_RELAY_TOKEN || "";
+// لیست سفید اختیاری برای پروکسی /http؛ اگر خالی باشد فقط توکن گیت می‌زند
+const HTTP_ALLOW = (process.env.SRV_HTTP_ALLOW || "")
+  .split(",")
+  .map((s) => s.trim().toLowerCase())
+  .filter(Boolean);
 // شناسهٔ بازبینی کد — در /ping برگردانده می‌شود تا از بیرون بتوان فهمید کدام نسخه فعال است
 // rev 2 = رفع باگ احراز رمزی (sshpass) + تایم‌اوت per-request
 // rev 3 = رفع باگ MEM/SWAP/DISK/UPTIME: printf بدون \n باعث میشد pick() مقدار را نگیرد
-const RELAY_REV = 3;
+// rev 4 = endpoint /http : پروکسی HTTP عمومی (برای عبور ترافیک آروان از رله)
+const RELAY_REV = 4;
 
 // محدودیت‌ها
 const EXEC_TIMEOUT_MS = Number(process.env.SRV_EXEC_TIMEOUT_MS || 45000);
@@ -276,7 +283,7 @@ const server = http.createServer(async (req, res) => {
     const token = req.headers["x-srv-token"] || u.searchParams.get("token") || "";
     if (!TOKEN || token !== TOKEN) return json(res, 403, { error: "forbidden" });
 
-    if (!rateOk()) return json(res, 429, { error: "rate_limited" });
+    if (p !== "/http" && !rateOk()) return json(res, 429, { error: "rate_limited" });
 
     if (req.method !== "POST") return json(res, 405, { error: "method" });
 
@@ -317,6 +324,46 @@ const server = http.createServer(async (req, res) => {
       const r = await sshInstallNode(host, port, user, { password, key, keyPass }, onChunk);
       try { res.end(JSON.stringify({ t: "done", ok: r.ok, code: r.code, tail: String(r.out || "").slice(-8000), err: String(r.err || "").slice(-2000) }) + "\n"); } catch (e) {}
       return;
+    }
+
+    if (p === "/http") {
+      // پروکسی HTTP عمومی — برای سرویس‌هایی که کلادفلر ورکر به آن‌ها دسترسی ندارد
+      // (مثل آروان که آی‌پی‌های کلادفلر را رد می‌کند). درخواست از روی هاست رله می‌رود.
+      const { method, url, headers, body, timeoutMs } = body || {};
+      const m = String(method || "GET").toUpperCase();
+      if (!/^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)$/.test(m)) return json(res, 400, { error: "bad_method" });
+      let tu;
+      try { tu = new URL(String(url || "")); } catch (e) { return json(res, 400, { error: "bad_url" }); }
+      if (!/^https?:$/.test(tu.protocol) || !tu.hostname) return json(res, 400, { error: "bad_url" });
+      if (HTTP_ALLOW.length && !HTTP_ALLOW.some((h) => tu.hostname === h || tu.hostname.endsWith("." + h))) {
+        return json(res, 403, { error: "host_not_allowed" });
+      }
+      const tMs = Math.min(Math.max(Number(timeoutMs) || 30000, 3000), 120000);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), tMs);
+      try {
+        const init = { method: m, headers: { ...(headers || {}) }, signal: controller.signal };
+        if (body !== undefined && body !== null && !/^(GET|HEAD)$/.test(m)) init.body = String(body);
+        const resp = await fetch(tu.href, init);
+        const buf = Buffer.from(await resp.arrayBuffer());
+        const MAX_BODY = 3 * 1024 * 1024; // سقف بدنهٔ پاسخ (۳MB)
+        const bodyText = buf.length > MAX_BODY ? buf.slice(0, MAX_BODY).toString("utf8") : buf.toString("utf8");
+        return json(res, 200, {
+          status: resp.status,
+          statusText: resp.statusText,
+          headers: {
+            "content-type": resp.headers.get("content-type") || "",
+            "location": resp.headers.get("location") || "",
+            "retry-after": resp.headers.get("retry-after") || "",
+          },
+          body: bodyText,
+          bytes: buf.length,
+        });
+      } catch (e) {
+        return json(res, 502, { error: "fetch_failed", detail: String(e).slice(0, 300) });
+      } finally {
+        clearTimeout(timer);
+      }
     }
 
     return json(res, 404, { error: "not_found" });
