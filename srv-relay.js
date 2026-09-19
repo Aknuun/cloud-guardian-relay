@@ -28,7 +28,7 @@ const HTTP_ALLOW = (process.env.SRV_HTTP_ALLOW || "")
 // rev 2 = رفع باگ احراز رمزی (sshpass) + تایم‌اوت per-request
 // rev 3 = رفع باگ MEM/SWAP/DISK/UPTIME: printf بدون \n باعث میشد pick() مقدار را نگیرد
 // rev 4 = endpoint /http : پروکسی HTTP عمومی (برای عبور ترافیک آروان از رله)
-const RELAY_REV = 4;
+const RELAY_REV = 6;
 
 // محدودیت‌ها
 const EXEC_TIMEOUT_MS = Number(process.env.SRV_EXEC_TIMEOUT_MS || 45000);
@@ -281,7 +281,15 @@ const server = http.createServer(async (req, res) => {
 
     // احراز هویت برای بقیهٔ مسیرها
     const token = req.headers["x-srv-token"] || u.searchParams.get("token") || "";
-    if (!TOKEN || token !== TOKEN) return json(res, 403, { error: "forbidden" });
+    try {
+      require("fs").appendFileSync(
+        "/tmp/relay-auth.log",
+        `${new Date().toISOString()} ${u.pathname} ip=${req.socket && req.socket.remoteAddress} len=${String(token).length} head=${String(token).slice(0, 8)}\n`
+      );
+    } catch (e) {}
+    if (!TOKEN || token !== TOKEN) {
+      return json(res, 403, { error: "forbidden" });
+    }
 
     if (p !== "/http" && !rateOk()) return json(res, 429, { error: "rate_limited" });
 
