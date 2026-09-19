@@ -163,3 +163,55 @@ elif printf '%s' "$TEST" | grep -q 'Connection refused\|Connection timed out\|Pe
 else
   echo "[i] خودتست (اطلاعاتی): ${TEST:0:200}"
 fi
+
+# ============================================================
+# 🎉 راهنمای ثبت رله در ربات — بعد از نصب
+# ============================================================
+ORANGE='\033[1;38;5;208m'
+RESET='\033[0m'
+if [ ! -t 1 ] || [ "${TERM:-dumb}" = "dumb" ]; then
+  ORANGE=''
+  RESET=''
+fi
+
+# یافتن آیپی عمومی سرور
+PUB_IP=""
+for cmd in \
+  "curl -s4 --max-time 8 https://ifconfig.me" \
+  "curl -s4 --max-time 8 https://api.ipify.org" \
+  "curl -s4 --max-time 8 https://ipinfo.io/ip"; do
+  PUB_IP=$(eval "$cmd" 2>/dev/null | tr -d '[:space:]')
+  [ -n "$PUB_IP" ] && break
+done
+[ -z "$PUB_IP" ] && PUB_IP="<آیپی-عمومی-سرور>"
+
+LINE="=========================================================="
+echo ""
+echo "$LINE"
+echo "  🎉 نصب رله کامل شد — حالا آن را در ربات ثبت کن:"
+echo "$LINE"
+echo ""
+echo "  1️⃣  این آیپی را کپی کن (در کلودفلر برایش ساب می‌سازی):"
+echo "      $(printf "${ORANGE}%s${RESET}" "$PUB_IP")"
+echo ""
+echo "  2️⃣  در کلودفلر یک ساب بساز (اختیاری ولی پیشنهادی):"
+echo "      مثلاً relay.example.com از نوع A با مقدار همین آیپی؛"
+echo "      تا آدرس رله کوتاه و یادمانی باشد."
+echo ""
+echo "  3️⃣  در ربات: «🖥 سرورها ← ℹ️ راهنمای رله ← 🔧 تنظیم رله»"
+echo "      آدرس رله را بفرست (یکی از این دو):"
+echo "      $(printf "${ORANGE}http://%s:8788${RESET}" "$PUB_IP")"
+if [ "$PUB_IP" != "<آیپی-عمومی-سرور>" ]; then
+  echo "      یا اگر ساب ساختی: $(printf "${ORANGE}http://%s:8788${RESET}" "relay.example.com")"
+fi
+echo ""
+echo "  4️⃣  توکن رله را بفرست:"
+echo "      $(printf "${ORANGE}%s${RESET}" "$TOKEN")"
+echo ""
+echo "  ربات خودش اتصال و توکن را تست می‌کند و «✅ رله ثبت شد» می‌دهد."
+echo "  🔥 قبل از ثبت، پورت 8788 باید از بیرون باز باشد:"
+echo "      sudo ufw allow 8788/tcp   (اگر فایروال فعال است)"
+echo ""
+echo "  تست در همین سرور:  curl -s http://127.0.0.1:8788/ping"
+echo "$LINE"
+echo ""
