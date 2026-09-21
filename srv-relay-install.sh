@@ -1,22 +1,11 @@
 #!/usr/bin/env bash
 # ============================================================
 # srv-relay installer — رلهٔ واحد SSH برای ربات نگهبان ابری
-#
-# نصب/آپدیت (توکن تصادفی یا حفظ توکن قبلی):
-#   sudo bash -c "$(curl -sL https://raw.githubusercontent.com/Aknuun/cloud-guardian-relay/main/srv-relay-install.sh)"
-#
-# نصب با «توکن ثابت» (همان توکن پیش‌فرض رلهٔ رایگان ربات):
-#   curl -fsSL https://raw.githubusercontent.com/Aknuun/cloud-guardian-relay/main/srv-relay-install.sh -o /tmp/srv-relay-install.sh \
-#     && sudo bash /tmp/srv-relay-install.sh --fixed
-#   (توکن پیش‌فرض: guardian-public — با --fixed=<token> قابل تغییر است)
-#
-# نصب با توکن دلخواه:
-#   sudo bash srv-relay-install.sh --token <token>
-#   یا:  sudo SRV_RELAY_TOKEN=<token> bash srv-relay-install.sh
-#
+# نصب/آپدیت:  sudo bash -c "$(curl -sL https://raw.githubusercontent.com/Aknuun/cloud-guardian-relay/main/srv-relay-install.sh)"
+# یا با توکن دلخواه:  sudo SRV_RELAY_TOKEN=<token> bash srv-relay-install.sh
 # • اگر srv-relay.js کنار اسکریپت باشد از همان استفاده می‌شود؛
 #   وگرنه از مخزن گیت‌هاب دانلود می‌شود.
-# • در آپدیت، توکنِ سرویسِ قبلی حفظ می‌شود (مگر --fixed/--token بدهید).
+# • در آپدیت، توکنِ سرویسِ قبلی حفظ می‌شود (مگر توکن جدید بدهید).
 # ============================================================
 set -euo pipefail
 
@@ -29,22 +18,7 @@ RAW_URLS=(
   "https://api.github.com/repos/Aknuun/cloud-guardian-relay/contents/srv-relay.js?ref=main"
   "https://cdn.jsdelivr.net/gh/Aknuun/cloud-guardian-relay@main/srv-relay.js"
 )
-# توکن ثابت پیش‌فرض — همان توکنی که ربات برای «رلهٔ رایگان پیش‌فرض» استفاده می‌کند.
-# با --fixed یا --fixed=<token> اعمال می‌شود تا آپدیت‌های بعدی هم توکن را عوض نکنند.
-FIXED_TOKEN_DEFAULT="guardian-public"
-
-# --- آرگومان‌ها: --token <t> | --token=<t> | --fixed[=<t>] ---
-TOKEN=""
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    --token)   TOKEN="${2:-}"; shift 2 ;;
-    --token=*) TOKEN="${1#*=}"; shift ;;
-    --fixed)   TOKEN="${FIXED_TOKEN_DEFAULT}"; shift ;;
-    --fixed=*) TOKEN="${1#*=}"; shift ;;
-    *)         shift ;;
-  esac
-done
-[ -n "${TOKEN:-}" ] || TOKEN="${SRV_RELAY_TOKEN:-}"
+TOKEN="${SRV_RELAY_TOKEN:-}"
 
 # --- منبع فایل رله: کنار اسکریپت یا دانلود از مخزن ---
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo ".")"
@@ -268,9 +242,5 @@ echo "  🔥 قبل از ثبت، پورت 8788 باید از بیرون باز 
 echo "      sudo ufw allow 8788/tcp   (اگر فایروال فعال است)"
 echo ""
 echo "  تست در همین سرور:  curl -s http://127.0.0.1:8788/ping"
-echo ""
-echo "  🔒 نصب/آپدیت با «توکن ثابت» (تا توکن با نصب جدید عوض نشود):"
-echo "      $(printf "${ORANGE}curl -fsSL https://raw.githubusercontent.com/Aknuun/cloud-guardian-relay/main/srv-relay-install.sh -o /tmp/srv-relay-install.sh && sudo bash /tmp/srv-relay-install.sh --fixed${RESET}")"
-echo "      (برای رلهٔ رایگان ربات: --fixed با توکن guardian-public — یا --token <توکن دلخواه>)"
 echo "$LINE"
 echo ""
