@@ -9,7 +9,7 @@ sudo bash -c "$(curl -sL https://raw.githubusercontent.com/Aknuun/cloud-guardian
 ```
 
 *   پورت پیش‌فرض: `8788`
-*   توکن رندوم ساخته میشه و تو ترمینال نمایش داده میشه
+*   توکن پیش‌فرض: `AknuunFixedToken2024` (هیچوقت عوض نمیشه)
 *   سرویس `srv-relay` به صورت `systemd` نصب و فعال میشه
 *   نیاز به `root` داره
 
