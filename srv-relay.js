@@ -28,7 +28,78 @@ const HTTP_ALLOW = (process.env.SRV_HTTP_ALLOW || "")
 // rev 2 = رفع باگ احراز رمزی (sshpass) + تایم‌اوت per-request
 // rev 3 = رفع باگ MEM/SWAP/DISK/UPTIME: printf بدون \n باعث میشد pick() مقدار را نگیرد
 // rev 4 = endpoint /http : پروکسی HTTP عمومی (برای عبور ترافیک آروان از رله)
-const RELAY_REV = 6;
+const RELAY_REV = 7;
+
+// Local KV store (rev 7): session storage for the worker.
+// The worker writes/reads transient keys here first (sessions, pend, tap-lock...)
+// so Cloudflare KV quota is not consumed; on relay failure the worker falls
+// back to its own KV. Memory + disk snapshot (every 30s when dirty).
+// Caps: 3000 keys, 64KB per value. Expired entries are swept on access.
+const KV_FILE = "/opt/srv-relay/kvstore.json";
+const KV_MAX_KEYS = 3000;
+const KV_MAX_VAL = 64 * 1024;
+const kvMem = new Map();
+let kvDirty = false;
+let kvLoaded = false;
+function kvLoad() {
+  if (kvLoaded) return;
+  kvLoaded = true;
+  try {
+    const raw = require("fs").readFileSync(KV_FILE, "utf8");
+    const obj = JSON.parse(raw);
+    if (obj && typeof obj === "object") {
+      for (const k of Object.keys(obj)) {
+        const e = obj[k];
+        if (e && typeof e.v === "string" && (!e.exp || e.exp > Date.now())) {
+          if (kvMem.size < KV_MAX_KEYS) kvMem.set(String(k).slice(0, 256), { v: e.v.slice(0, KV_MAX_VAL), exp: Number(e.exp) || 0 });
+        }
+      }
+    }
+  } catch (e) {}
+}
+function kvSave() {
+  if (!kvDirty) return;
+  kvDirty = false;
+  try {
+    const obj = {};
+    for (const [k, e] of kvMem) obj[k] = e;
+    require("fs").writeFileSync(KV_FILE + ".tmp", JSON.stringify(obj).slice(0, 8 * 1024 * 1024));
+    require("fs").renameSync(KV_FILE + ".tmp", KV_FILE);
+  } catch (e) {}
+}
+setInterval(kvSave, 30000).unref();
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, e] of kvMem) {
+    if (e.exp && e.exp <= now) { kvMem.delete(k); kvDirty = true; }
+  }
+}, 60000).unref();
+function kvGetOne(key) {
+  kvLoad();
+  const e = kvMem.get(String(key));
+  if (!e) return null;
+  if (e.exp && e.exp <= Date.now()) { kvMem.delete(String(key)); kvDirty = true; return null; }
+  return e.v;
+}
+function kvPutOne(key, value, ttlSec) {
+  kvLoad();
+  const k = String(key).slice(0, 256);
+  const v = String(value === null || value === undefined ? "" : value).slice(0, KV_MAX_VAL);
+  if (kvMem.size >= KV_MAX_KEYS && !kvMem.has(k)) {
+    const first = kvMem.keys().next();
+    if (!first.done) kvMem.delete(first.value);
+  }
+  const ttl = Math.max(0, Number(ttlSec) || 0);
+  kvMem.set(k, { v: v, exp: ttl > 0 ? Date.now() + Math.min(ttl, 30 * 86400) * 1000 : 0 });
+  kvDirty = true;
+  return true;
+}
+function kvDelOne(key) {
+  kvLoad();
+  const had = kvMem.delete(String(key));
+  if (had) kvDirty = true;
+  return had;
+}
 
 // محدودیت‌ها
 const EXEC_TIMEOUT_MS = Number(process.env.SRV_EXEC_TIMEOUT_MS || 45000);
@@ -291,7 +362,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 403, { error: "forbidden" });
     }
 
-    if (p !== "/http" && !rateOk()) return json(res, 429, { error: "rate_limited" });
+    if (p !== "/http" && !p.startsWith("/kv") && !rateOk()) return json(res, 429, { error: "rate_limited" });
 
     if (req.method !== "POST") return json(res, 405, { error: "method" });
 
@@ -372,6 +443,27 @@ const server = http.createServer(async (req, res) => {
       } finally {
         clearTimeout(timer);
       }
+    }
+
+    if (p === "/kvget") {
+      const arr = Array.isArray(body.keys) ? body.keys.slice(0, 20) : [];
+      const out = {};
+      for (const k of arr) {
+        const key = String(k || "").slice(0, 256);
+        if (!key) continue;
+        out[key] = kvGetOne(key);
+      }
+      return json(res, 200, { ok: true, keys: out });
+    }
+    if (p === "/kvput") {
+      const key = String(body.key || "").slice(0, 256);
+      if (!key) return json(res, 400, { error: "bad_key" });
+      kvPutOne(key, body.value === undefined ? "" : body.value, body.ttlSec);
+      return json(res, 200, { ok: true });
+    }
+    if (p === "/kvdel") {
+      kvDelOne(String(body.key || ""));
+      return json(res, 200, { ok: true });
     }
 
     return json(res, 404, { error: "not_found" });
